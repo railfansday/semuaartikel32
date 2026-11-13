@@ -3,22 +3,16 @@ import json
 import sqlite3
 import feedparser
 import requests
+import random
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from google import genai
 
-# --- KONFIGURASI PATH, DOMAIN & AI ---
+# --- KONFIGURASI PATH & DOMAIN ---
 DB_PATH = "database.sqlite"
 RSS_FILE = "rss_list.txt"
 OUTPUT_DIR = "."
 BASE_URL = "https://thenewsday112.github.io/semuaartikel5"
-
-# Inisialisasi Klien Gemini untuk Parafrase (Mengambil API Key dari Environment Variable)
-try:
-    ai_client = genai.Client()
-except Exception:
-    ai_client = None
 
 # Header HTTP agar scraping tidak diblokir
 HEADERS = {
@@ -26,37 +20,57 @@ HEADERS = {
 }
 
 # --------------------------------------------------------------------------
-# FUNGSI PARAFFRASE KONTEN DENGAN AI (GEMINI)
+# FUNGSI PARAFFRASE LOKAL PYTHON (Tanpa AI / Tanpa API Key)
 # --------------------------------------------------------------------------
-def paraphrase_text(text_html):
-    if not ai_client or not text_html:
+def local_paraphrase(text_html):
+    if not text_html:
         return text_html
     
     try:
-        # Membersihkan tag HTML sebentar untuk diparafrase AI
         soup = BeautifulSoup(text_html, 'html.parser')
-        plain_text = soup.get_text()
+        paragraphs = soup.find_all('p')
         
-        if len(plain_text.strip()) < 50:
+        new_paragraphs = []
+        for p in paragraphs:
+            text = p.get_text().strip()
+            if not text:
+                continue
+                
+            # Pecah kalimat berdasarkan titik
+            sentences = [s.strip() for s in text.split('.') if s.strip()]
+            
+            # Jika kalimat lebih dari 1, kita lakukan teknik parafrase lokal:
+            # Mengubah urutan atau menyisipkan variasi transisi agar unik
+            if len(sentences) > 1:
+                # Contoh variasi pergeseran posisi atau penambahan frasa natural
+                transition_phrases = [
+                    "Berdasarkan laporan, ", 
+                    "Sebagaimana diketahui, ", 
+                    "Dalam perkembangan terbarunya, ", 
+                    "Diungkapkan bahwa "
+                ]
+                # Modifikasi kalimat pertama dengan transisi secara acak
+                if not sentences[0].startswith(tuple(transition_phrases)):
+                    sentences[0] = random.choice(transition_phrases) + sentences[0].lower()
+                
+                # Jika ada 3 kalimat atau lebih, balik urutan kalimat tengah untuk keunikan struktur
+                if len(sentences) >= 3:
+                    middle = sentences[1:-1]
+                    random.shuffle(middle)
+                    sentences[1:-1] = middle
+            
+            modified_text = '. '.join(sentences)
+            if not modified_text.endswith('.'):
+                modified_text += '.'
+                
+            new_paragraphs.append(f"<p>{modified_text}</p>")
+            
+        if not new_paragraphs:
             return text_html
-
-        prompt = (
-            "Tulis ulang (parafrase) teks berita berikut ke dalam bahasa Indonesia yang profesional, "
-            "unik, natural, dan ramah SEO, tanpa mengubah inti informasi atau fakta di dalamnya. "
-            "Berikan hasilnya dalam bentuk paragraf HTML (<p>...</p>):\n\n" + plain_text
-        )
-
-        response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        
-        if response and response.text:
-            return response.text
-    except Exception as e:
-        print(f"[WARNING] Gagal melakukan parafrase AI: {e}")
-    
-    return text_html
+            
+        return "\n".join(new_paragraphs)
+    except Exception:
+        return text_html
 
 # --------------------------------------------------------------------------
 # KODE IKLAN ADSTERRA
@@ -110,7 +124,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 # --------------------------------------------------------------------------
 # EXTRACT KONTEN + GAMBAR + TANGGAL
 # --------------------------------------------------------------------------
@@ -148,7 +161,6 @@ def extract_full_content(url):
     except Exception:
         return None, None, None
 
-
 # --------------------------------------------------------------------------
 # PROCESS SINGLE FEED
 # --------------------------------------------------------------------------
@@ -183,9 +195,9 @@ def process_single_feed(feed_url):
                 summary = entry.get('summary', entry.get('description', 'Konten tidak tersedia.'))
                 full_text_html = f"<p>{summary}</p>"
             
-            # --- JALANKAN PROSES PARASTATIC / PARAFFRASE AI ---
-            print(f"[*] Memparafrase artikel: {judul[:40]}...")
-            full_text_html = paraphrase_text(full_text_html)
+            # --- JALANKAN PARAFFRASE LOKAL PYTHON ---
+            print(f"[*] Memproses & memparafrase lokal: {judul[:40]}...")
+            full_text_html = local_paraphrase(full_text_html)
 
             if not tanggal:
                 published_parsed = entry.get('published_parsed')
@@ -230,7 +242,6 @@ def process_single_feed(feed_url):
         
     return baru, duplikat
 
-
 # --------------------------------------------------------------------------
 # GENERATE SITEMAP.XML & ROBOTS.TXT
 # --------------------------------------------------------------------------
@@ -243,7 +254,6 @@ def generate_sitemap_and_robots():
     
     today = datetime.now().strftime('%Y-%m-%d')
     
-    # Sitemap
     sitemap_path = os.path.join(OUTPUT_DIR, "sitemap.xml")
     xml_parts = ['<?xml version="1.0" encoding="UTF-8"?>']
     xml_parts.append('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
@@ -258,15 +268,13 @@ def generate_sitemap_and_robots():
     with open(sitemap_path, "w", encoding="utf-8") as f:
         f.write("\n".join(xml_parts))
     
-    # Robots
     robots_path = os.path.join(OUTPUT_DIR, "robots.txt")
     robots_content = f"User-agent: *\nAllow: /\nSitemap: {BASE_URL}/sitemap.xml\nCrawl-delay: 1\n"
     with open(robots_path, "w", encoding="utf-8") as f:
         f.write(robots_content)
 
-
 # --------------------------------------------------------------------------
-# EXPORT KE INDEX.HTML & PAGE2.HTML (KATALOG GRID / INTERAKTIF)
+# EXPORT KE INDEX.HTML & PAGE2.HTML
 # --------------------------------------------------------------------------
 def export_to_two_files():
     if not os.path.exists(DB_PATH):
@@ -444,7 +452,6 @@ def export_to_two_files():
             background: var(--primary);
             color: white;
         }}
-        /* Modal Detail Artikel */
         .modal {{
             display: none;
             position: fixed;
@@ -494,92 +501,4 @@ def export_to_two_files():
         <div class="grid-container" id="articleGrid">""")
 
         for item in chunk:
-            artikel_id, judul, konten, gambar, tanggal_publish, tanggal_update, link = item
-            safe_title = str(judul).replace('"', '').replace("'", '').replace('/', '_').replace('\\', '_')
-            img_thumb = gambar if gambar else "https://via.placeholder.com/350x180?text=Portal+Berita"
-            
-            try:
-                tgl_pub = datetime.fromisoformat(tanggal_publish.replace('Z', '+00:00')).strftime('%d %b %Y') if tanggal_publish else '-'
-            except Exception:
-                tgl_pub = tanggal_publish[:10] if tanggal_publish else '-'
-
-            html_parts.append(f"""
-            <div class="article-card" data-title="{judul.lower()}">
-                <div>
-                    <img src="{img_thumb}" alt="{judul}" loading="lazy">
-                    <h2>#{artikel_id}. {judul}</h2>
-                    <div class="article-meta">📅 {tgl_pub}</div>
-                </div>
-                <div class="card-actions">
-                    <button class="btn" onclick="openModal({artikel_id})">📖 Baca Selengkapnya</button>
-                    <button class="btn btn-pdf" onclick="downloadPDF('content-{artikel_id}', '{safe_title}')">📄 PDF</button>
-                </div>
-                <!-- Hidden content for modal & pdf -->
-                <div id="content-{artikel_id}" style="display:none;">
-                    <h2 style="color:#111;">{judul}</h2>
-                    <p style="font-size:12px; color:#666;">Tanggal: {tgl_pub} | Sumber: {link}</p>
-                    <hr style="border:0; border-top:1px solid #ddd; margin:15px 0;">
-                    {konten}
-                </div>
-            </div>""")
-
-        idx1_active = "active" if filename == "index.html" else ""
-        idx2_active = "active" if filename == "page2.html" else ""
-
-        html_parts.append(f"""
-        </div>
-        <div class="pagination">
-            <a href="index.html" class="{idx1_active}">⬅️ Halaman 1</a>
-            <a href="page2.html" class="{idx2_active}">Halaman 2 ➡️</a>
-        </div>
-    </div>
-
-    <!-- Modal Popup -->
-    <div id="articleModal" class="modal">
-        <div class="modal-content">
-            <span class="close-modal" onclick="closeModal()">&times;</span>
-            <div id="modalBody"></div>
-        </div>
-    </div>
-
-    <script>
-        function filterArticles() {{
-            let input = document.getElementById('searchInput').value.toLowerCase();
-            let cards = document.getElementsByClassName('article-card');
-            for (let i = 0; i < cards.length; i++) {{
-                let title = cards[i].getAttribute('data-title');
-                if (title.includes(input)) {{
-                    cards[i].style.display = "";
-                }} else {{
-                    cards[i].style.display = "none";
-                }}
-            }}
-        }}
-
-        function openModal(id) {{
-            let content = document.getElementById('content-' + id).innerHTML;
-            document.getElementById('modalBody').innerHTML = content;
-            document.getElementById('articleModal').style.display = 'flex';
-        }}
-
-        function closeModal() {{
-            document.getElementById('articleModal').style.display = 'none';
-        }}
-
-        window.onclick = function(event) {{
-            let modal = document.getElementById('articleModal');
-            if (event.target == modal) {{
-                modal.style.display = 'none';
-            }}
-        }}
-
-        function downloadPDF(elementId, filename) {{
-            let element = document.getElementById(elementId);
-            let originalDisplay = element.style.display;
-            element.style.display = 'block';
-            
-            const opt = {{
-                margin: 10,
-                filename: filename + '.pdf',
-                image: {{ type: 'jpeg', quality: 0.98 }},
-                html2canvas: {{ scale
+            artikel_id
