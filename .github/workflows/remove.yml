@@ -1,0 +1,61 @@
+name: Remove Canonical Tags
+
+on:
+  workflow_dispatch: # Jalankan manual kapan saja dari tab Actions
+  push:
+    branches: [ main, master ] # Otomatis berjalan setiap ada update file HTML
+
+permissions:
+  contents: write
+
+jobs:
+  clean-canonical:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Hapus Tag Canonical di Semua File HTML
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+
+          # Pola regex untuk menangkap tag <link ... rel="canonical" ...> dalam berbagai variasi urutan atribut
+          canonical_pattern = re.compile(
+              r'<link\b[^>]*\brel\s*=\s*["\']?canonical["\']?[^>]*>\s*',
+              re.IGNORECASE
+          )
+
+          modified_count = 0
+
+          for root, dirs, files in os.walk("."):
+              if ".git" in root or ".github" in root:
+                  continue
+              for file in files:
+                  if file.endswith(".html"):
+                      file_path = os.path.join(root, file)
+                      try:
+                          with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                              content = f.read()
+
+                          new_content, count = canonical_pattern.subn("", content)
+
+                          if count > 0:
+                              with open(file_path, "w", encoding="utf-8") as f:
+                                  f.write(new_content)
+                              print(f"Berhasil menghapus {count} tag canonical dari: {file_path}")
+                              modified_count += 1
+                      except Exception as e:
+                          print(f"Gagal memproses {file_path}: {e}")
+
+          print(f"Selesai! Total file yang dibersihkan: {modified_count}")
+          EOF
+
+      - name: Commit dan Push Perubahan
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add "*.html"
+          git commit -m "🧹 Remove canonical tags from HTML files" || echo "Tidak ada tag canonical yang perlu dihapus"
+          git push
