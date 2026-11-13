@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
-Sitemap: https://thenewsday112.github.io/semuaartikel5/sitemap.xml
+Sitemap: https://thenewsday112.github.io/semuaartikel32/sitemap.xml
 Crawl-delay: 1
