@@ -12,7 +12,7 @@ from datetime import datetime
 DB_PATH = "database.sqlite"
 RSS_FILE = "rss_list.txt"
 OUTPUT_DIR = "."
-BASE_URL = "https://thenewsday112.github.io/semuaartikel5"
+BASE_URL = "https://thenewsday112.github.io/semuaartikel32"
 
 # Header HTTP agar scraping tidak diblokir
 HEADERS = {
