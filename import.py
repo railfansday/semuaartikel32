@@ -310,7 +310,6 @@ def export_to_two_files():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Portal Berita Interaktif - {part_name}</title>
     <meta name="description" content="{meta_desc}">
-    <link rel="canonical" href="{canonical_url}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         :root {{
