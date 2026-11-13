@@ -39,10 +39,9 @@ def local_paraphrase(text_html):
             # Pecah kalimat berdasarkan titik
             sentences = [s.strip() for s in text.split('.') if s.strip()]
             
-            # Jika kalimat lebih dari 1, kita lakukan teknik parafrase lokal:
+            # Jika kalimat lebih dari 1, lakukan teknik parafrase lokal:
             # Mengubah urutan atau menyisipkan variasi transisi agar unik
             if len(sentences) > 1:
-                # Contoh variasi pergeseran posisi atau penambahan frasa natural
                 transition_phrases = [
                     "Berdasarkan laporan, ", 
                     "Sebagaimana diketahui, ", 
@@ -501,4 +500,149 @@ def export_to_two_files():
         <div class="grid-container" id="articleGrid">""")
 
         for item in chunk:
-            artikel_id
+            artikel_id, judul, konten, gambar, tanggal_publish, tanggal_update, link = item
+            safe_title = str(judul).replace('"', '').replace("'", '').replace('/', '_').replace('\\', '_')
+            img_thumb = gambar if gambar else "https://via.placeholder.com/350x180?text=Portal+Berita"
+            
+            try:
+                tgl_pub = datetime.fromisoformat(tanggal_publish.replace('Z', '+00:00')).strftime('%d %b %Y') if tanggal_publish else '-'
+            except Exception:
+                tgl_pub = tanggal_publish[:10] if tanggal_publish else '-'
+
+            html_parts.append(f"""
+            <div class="article-card" data-title="{judul.lower()}">
+                <div>
+                    <img src="{img_thumb}" alt="{judul}" loading="lazy">
+                    <h2>#{artikel_id}. {judul}</h2>
+                    <div class="article-meta">📅 {tgl_pub}</div>
+                </div>
+                <div class="card-actions">
+                    <button class="btn" onclick="openModal({artikel_id})">📖 Baca Selengkapnya</button>
+                    <button class="btn btn-pdf" onclick="downloadPDF('content-{artikel_id}', '{safe_title}')">📄 PDF</button>
+                </div>
+                <div id="content-{artikel_id}" style="display:none;">
+                    <h2 style="color:#111;">{judul}</h2>
+                    <p style="font-size:12px; color:#666;">Tanggal: {tgl_pub} | Sumber: {link}</p>
+                    <hr style="border:0; border-top:1px solid #ddd; margin:15px 0;">
+                    {konten}
+                </div>
+            </div>""")
+
+        idx1_active = "active" if filename == "index.html" else ""
+        idx2_active = "active" if filename == "page2.html" else ""
+
+        html_parts.append(f"""
+        </div>
+        <div class="pagination">
+            <a href="index.html" class="{idx1_active}">⬅️ Halaman 1</a>
+            <a href="page2.html" class="{idx2_active}">Halaman 2 ➡️</a>
+        </div>
+    </div>
+
+    <div id="articleModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeModal()">&times;</span>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        function filterArticles() {{
+            let input = document.getElementById('searchInput').value.toLowerCase();
+            let cards = document.getElementsByClassName('article-card');
+            for (let i = 0; i < cards.length; i++) {{
+                let title = cards[i].getAttribute('data-title');
+                if (title.includes(input)) {{
+                    cards[i].style.display = "";
+                }} else {{
+                    cards[i].style.display = "none";
+                }}
+            }}
+        }}
+
+        function openModal(id) {{
+            let content = document.getElementById('content-' + id).innerHTML;
+            document.getElementById('modalBody').innerHTML = content;
+            document.getElementById('articleModal').style.display = 'flex';
+        }}
+
+        function closeModal() {{
+            document.getElementById('articleModal').style.display = 'none';
+        }}
+
+        window.onclick = function(event) {{
+            let modal = document.getElementById('articleModal');
+            if (event.target == modal) {{
+                modal.style.display = 'none';
+            }}
+        }}
+
+        function downloadPDF(elementId, filename) {{
+            let element = document.getElementById(elementId);
+            let originalDisplay = element.style.display;
+            element.style.display = 'block';
+            
+            const opt = {{
+                margin: 10,
+                filename: filename + '.pdf',
+                image: {{ type: 'jpeg', quality: 0.98 }},
+                html2canvas: {{ scale: 2, useCORS: true }},
+                jsPDF: {{ unit: 'mm', format: 'a4', orientation: 'portrait' }}
+            }};
+
+            html2pdf().set(opt).from(element).save().then(() => {{
+                element.style.display = originalDisplay;
+            }});
+        }}
+    </script>
+</body>
+</html>""")
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(html_parts))
+
+        print(f"✅ Katalog Grid HTML: {output_file} ({len(chunk)} artikel)")
+
+# --------------------------------------------------------------------------
+# SCRAPE UTAMA
+# --------------------------------------------------------------------------
+def scrape_massive_rss():
+    if not os.path.exists(RSS_FILE):
+        print(f"[ERROR] File {RSS_FILE} tidak ditemukan!")
+        return
+
+    init_db()
+    
+    with open(RSS_FILE, "r", encoding="utf-8") as f:
+        rss_urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    print(f"[*] Memulai penarikan data dari {len(rss_urls)} sumber RSS...\n")
+
+    total_baru = 0
+    total_duplikat = 0
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_single_feed, url): url for url in rss_urls}
+        for future in as_completed(futures):
+            b, d = future.result()
+            total_baru += b
+            total_duplikat += d
+
+    print("\n" + "="*45)
+    print(f"[SELESAI PEMANENAN]")
+    print(f" - Artikel Baru : {total_baru}")
+    print(f" - Duplikat/Eksis: {total_duplikat}")
+    print("="*45)
+
+    print("\n[*] Generate Katalog HTML (index.html & page2.html)...")
+    export_to_two_files()
+    
+    print("\n[*] Generate sitemap.xml & robots.txt...")
+    generate_sitemap_and_robots()
+    
+    print("\n" + "="*45)
+    print("[SELESAI] Proses build selesai dengan sukses!")
+    print("="*45)
+
+if __name__ == "__main__":
+    scrape_massive_rss()
